@@ -1,5 +1,4 @@
 streamlit
 google-genai
 Pillow
-tenacity
-pydantic
+st-copy-to-clipboard
