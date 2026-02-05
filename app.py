@@ -6,11 +6,9 @@ from google.genai import types
 
 # --- PAGE SETUP ---
 st.set_page_config(page_title="Cinematography AI", layout="wide")
-st.title("🎬 AI Cinematography Assistant")
-st.write("Upload a frame to get professional camera blocking and shot lists.")
+st.title("🎬 AI Cinematography Assistant (Fast Mode)")
 
 # --- API KEY CONFIGURATION ---
-# This looks for your key in Streamlit Secrets (for sharing) or a local Environment Variable
 api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
 
 if not api_key:
@@ -33,23 +31,19 @@ if api_key:
         img = PIL.Image.open(uploaded_file)
         st.image(img, caption='Reference Frame', use_container_width=True)
 
-        with st.spinner("Analyzing with High Reasoning..."):
+        with st.spinner("Analyzing with Flash Reasoning..."):
             try:
-                # Configuration exactly as requested in your SDK snippet
+                # Gemini 3 Flash supports Thinking levels while remaining highly efficient
                 generate_content_config = types.GenerateContentConfig(
                     thinking_config=types.ThinkingConfig(
-                        thinking_level="HIGH", # Supported by Gemini 3
+                        thinking_level="HIGH", # Gemini 3 Flash supports this level for deeper reasoning
                     ),
-                    tools=[types.Tool(googleSearch=types.GoogleSearch())],
-                    system_instruction="""You are a professional cinematographer and camera blocking director.
-Your job is to analyze the uploaded image and infer where the main subject is, face and body orientation, spatial depth, and layout. 
-Only camera position, lens, framing, and movement are allowed to change. 
-[... REST OF YOUR SYSTEM INSTRUCTIONS HERE ...]"""
+                    system_instruction="""You are a professional cinematographer... [PASTE YOUR FULL INSTRUCTIONS HERE]"""
                 )
 
-                # Send request using Gemini 3 Pro
+                # Switching to the Flash-tier model to avoid the 'limit: 0' Pro error
                 response = client.models.generate_content(
-                    model="gemini-3-pro-preview",
+                    model="gemini-3-flash-preview", 
                     contents=[user_input, img],
                     config=generate_content_config,
                 )
@@ -59,6 +53,7 @@ Only camera position, lens, framing, and movement are allowed to change.
 
             except Exception as e:
                 st.error(f"An error occurred: {e}")
-                st.info("Tip: Ensure your API key has access to Gemini 3 Pro Preview.")
+                if "429" in str(e):
+                    st.warning("Daily limits reached. Please wait for reset or switch to a paid tier.")
 else:
     st.warning("Please enter an API key in the sidebar to begin.")
