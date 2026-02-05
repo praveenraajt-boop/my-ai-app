@@ -5,58 +5,70 @@ from google import genai
 from google.genai import types
 from st_copy_to_clipboard import st_copy_to_clipboard
 
-# --- PAGE SETUP ---
+# --- 1. PAGE CONFIG (Must be the first Streamlit command) ---
 st.set_page_config(page_title="Cinematography AI", layout="wide")
-st.title("🎬 Professional Cinematographer AI")
 
-# --- API KEY CONFIGURATION ---
-api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
+# --- 2. SIDEBAR FOR SETTINGS ---
+with st.sidebar:
+    st.title("🎬 Director Settings")
+    # API Key handling: checks secrets first, then environment, then user input
+    api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        api_key = st.text_input("Enter Gemini API Key", type="password")
+    
+    st.divider()
+    mode = st.selectbox("Select Analysis Mode", 
+        ["General Analysis", "360° shot list", "dolly orbits", "dialogue coverage", "cinematic coverage map"])
+    st.info("Using Gemini 3 Flash for faster performance and higher limits.")
 
-if not api_key:
-    api_key = st.sidebar.text_input("Enter Gemini API Key", type="password")
+# --- 3. MAIN PAGE INTERFACE ---
+st.title("Professional Cinematographer AI")
+st.write("Upload a frame to generate precise camera plans and prompts.")
 
-if api_key:
-    client = genai.Client(api_key=api_key)
+uploaded_file = st.file_uploader("Upload a reference frame...", type=["jpg", "jpeg", "png"])
+user_query = st.text_input("Additional Instructions (Optional)", value=f"Requesting a {mode}")
 
-    # --- SIDEBAR OPTIONS ---
-    st.sidebar.header("Shot Mode")
-    mode = st.sidebar.selectbox("Choose analysis type:", 
-        ["360° shot list", "dolly orbits", "dialogue coverage", "cinematic coverage map", "General Analysis"])
-
-    # --- MAIN INTERFACE ---
-    uploaded_file = st.file_uploader("Upload reference image...", type=["jpg", "jpeg", "png"])
-    user_input = st.text_input("User Request", value=f"Provide a {mode} for this scene.")
-
-    if uploaded_file and st.button("Generate Camera Plan"):
+# --- 4. PROCESSING LOGIC ---
+if uploaded_file:
+    # Display the image neatly in a column
+    col1, col2 = st.columns([1, 1])
+    with col1:
         img = PIL.Image.open(uploaded_file)
-        st.image(img, caption='Reference Frame', width=500)
+        st.image(img, caption='Reference Frame', use_container_width=True)
 
-        with st.spinner("Director is thinking..."):
-            try:
-                # Optimized for Gemini 3 Flash to avoid 429 errors
-                generate_content_config = types.GenerateContentConfig(
-                    system_instruction="""You are a professional cinematographer... [PASTE YOUR FULL INSTRUCTIONS HERE]"""
-                )
+    if st.button("Generate Camera Plan", type="primary"):
+        if not api_key:
+            st.error("Please provide an API key in the sidebar.")
+        else:
+            with st.spinner("Analyzing blocking and lighting..."):
+                try:
+                    client = genai.Client(api_key=api_key)
+                    
+                    # Full instructions block
+                    system_instructions = """You are a professional cinematographer and camera blocking director.
+[PASTE_YOUR_FULL_SYSTEM_INSTRUCTIONS_HERE]"""
 
-                response = client.models.generate_content(
-                    model="gemini-3-flash-preview", 
-                    contents=[user_input, img],
-                    config=generate_content_config,
-                )
+                    config = types.GenerateContentConfig(
+                        system_instruction=system_instructions,
+                        tools=[types.Tool(googleSearch=types.GoogleSearch())]
+                    )
 
-                st.subheader("Director's Recommendation")
-                
-                # Display the response
-                result_text = response.text
-                st.markdown(result_text)
-                
-                # THE FUNCTIONAL COPY BUTTON
-                st.write("---")
-                st.write("### Copy Prompt for Nano Banana:")
-                st_copy_to_clipboard(result_text)
-                st.success("Click the button above to copy the prompt!")
+                    # Send to Gemini 3 Flash (Fast and stable)
+                    response = client.models.generate_content(
+                        model="gemini-3-flash-preview",
+                        contents=[user_query, img],
+                        config=config
+                    )
 
-            except Exception as e:
-                st.error(f"Error: {e}")
-else:
-    st.warning("Please provide an API key in the sidebar.")
+                    with col2:
+                        st.subheader("Shot Plan")
+                        st.markdown(response.text)
+                        
+                        # Dedicated copy section
+                        st.write("---")
+                        st.write("### Copy for Nano Banana:")
+                        st_copy_to_clipboard(response.text)
+                        st.caption("Click above to copy the full response.")
+
+                except Exception as e:
+                    st.error(f"Execution Error: {e}")
