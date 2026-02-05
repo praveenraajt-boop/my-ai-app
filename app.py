@@ -1,26 +1,36 @@
 import streamlit as st
 import PIL.Image
 import os
-import json
+from typing import List
+from pydantic import BaseModel, Field
 from google import genai
 from google.genai import types
 from tenacity import retry, stop_after_attempt, wait_random_exponential
 
-# --- PAGE SETUP ---
+# --- 1. DEFINE STRUCTURED DATA MODELS ---
+# These classes act as the "shape" of your AI's response
+class ShotPrompt(BaseModel):
+    shot_name: str = Field(description="The name of the camera shot")
+    prompt: str = Field(description="The full prompt for the image generator")
+
+class CinemaResponse(BaseModel):
+    analysis: str = Field(description="Brief technical breakdown of subject and layout")
+    angle_prompts: List[ShotPrompt]
+
+# --- 2. PAGE CONFIG ---
 st.set_page_config(page_title="Cinematography AI", layout="wide")
-st.title("🎬 AI Cinematography Assistant")
+st.title("🎬 Professional Cinematographer AI")
 
-# --- API KEY CONFIGURATION ---
+# --- 3. API KEY ---
 api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
-
 if not api_key:
     api_key = st.sidebar.text_input("Enter Gemini API Key", type="password")
 
-# --- RESILIENT CALL FUNCTION ---
+# --- 4. RESILIENT API CALL ---
 @retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(5))
-def generate_with_retry(client, model_id, contents, config):
+def generate_camera_plan(client, contents, config):
     return client.models.generate_content(
-        model=model_id,
+        model="gemini-3-flash-preview",
         contents=contents,
         config=config,
     )
@@ -28,61 +38,37 @@ def generate_with_retry(client, model_id, contents, config):
 if api_key:
     client = genai.Client(api_key=api_key)
 
-    # --- SIDEBAR & INPUTS ---
+    # --- 5. UI ELEMENTS ---
     st.sidebar.header("Shot Mode")
     mode = st.sidebar.selectbox("Choose analysis type:", 
         ["360° shot list", "dolly orbits", "dialogue coverage", "cinematic coverage map", "General Analysis"])
 
-    uploaded_file = st.file_uploader("Upload reference image...", type=["jpg", "jpeg", "png"])
-    user_input = st.text_input("User Request", value=f"Provide a {mode} for this scene.")
+    uploaded_file = st.file_uploader("Upload reference frame...", type=["jpg", "jpeg", "png"])
+    user_input = st.text_input("Custom Request", value=f"Provide a {mode} for this scene.")
 
     if uploaded_file and st.button("Generate Camera Plan"):
         img = PIL.Image.open(uploaded_file)
-        st.image(img, caption='Reference Frame', use_container_width=True)
+        st.image(img, caption='Input Scene', use_container_width=True)
 
-        with st.spinner("Analyzing with Structured Output..."):
+        with st.spinner("Director is deep-thinking..."):
             try:
-                # YOUR STRUCTURED OUTPUT SCHEMA
-                response_schema = {
-                    "type": "OBJECT",
-                    "properties": {
-                        "analysis": {
-                            "type": "STRING",
-                            "description": "Brief technical breakdown of subject position and spatial layout"
-                        },
-                        "angle_prompts": {
-                            "type": "ARRAY",
-                            "items": {
-                                "type": "OBJECT",
-                                "properties": {
-                                    "shot_name": {"type": "STRING"},
-                                    "prompt": {"type": "STRING"}
-                                },
-                                "required": ["shot_name", "prompt"]
-                            }
-                        }
-                    },
-                    "required": ["analysis", "angle_prompts"]
-                }
-
-                # Configuration for Gemini 3 Flash
+                # Configuration using your Pydantic model
                 generate_content_config = types.GenerateContentConfig(
                     thinking_config=types.ThinkingConfig(thinking_level="HIGH"),
-                    response_mime_type="application/json", # Required for schema
-                    response_schema=response_schema,       # Attaching your schema
+                    response_mime_type="application/json",
+                    response_schema=CinemaResponse, # Attaching the Pydantic class
                     system_instruction="""[PASTE YOUR FULL CINEMATOGRAPHY INSTRUCTIONS HERE]"""
                 )
 
-                # Call the model
-                response = generate_with_retry(
+                # Execute with retry logic
+                response = generate_camera_plan(
                     client, 
-                    "gemini-3-flash-preview", 
                     [user_input, img], 
                     generate_content_config
                 )
 
-                # PARSING AND DISPLAYING RESULTS
-                result = response.parsed # SDK automatically parses JSON when schema is provided
+                # --- 6. DISPLAY RESULTS (Dot notation now works!) ---
+                result = response.parsed # SDK automatically creates a CinemaResponse object
                 
                 st.subheader("Technical Analysis")
                 st.info(result.analysis)
@@ -94,6 +80,6 @@ if api_key:
                         st.button(f"Copy {shot.shot_name}", on_click=lambda p=shot.prompt: st.write(f"Copied: {p}"), key=shot.shot_name)
 
             except Exception as e:
-                st.error(f"Structured analysis failed. Error: {e}")
+                st.error(f"Analysis failed: {e}")
 else:
-    st.warning("Please enter an API key in the sidebar to begin.")
+    st.warning("Please enter an API key to begin.")
